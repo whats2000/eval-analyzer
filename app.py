@@ -165,7 +165,12 @@ cat_order = order_df["category"].tolist()
 
 # 如果篩選後沒有類別，顯示提示
 if not cat_order:
-    st.warning(f"⚠️ 沒有類別符合篩選條件（{threshold_mode}: {threshold_value}），請調整閾值或關閉篩選。")
+    if enable_threshold and threshold_mode is not None and threshold_value is not None:
+        st.warning(
+            f"⚠️ 沒有類別符合篩選條件（{threshold_mode}: {threshold_value}），請調整閾值或關閉篩選。"
+        )
+    else:
+        st.warning("⚠️ 沒有可顯示的類別，請檢查資料集內容或調整篩選條件。")
     st.stop()
 
 work["category"] = pd.Categorical(work["category"], categories=cat_order, ordered=True)
