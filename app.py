@@ -108,6 +108,22 @@ with st.sidebar:
     page_size = st.selectbox("每張圖顯示幾個類別", [10, 20, 30, 50, 100], index=1)
     sort_mode = st.selectbox("排序方式（原始成績）", ["依整體平均由高到低", "依整體平均由低到高", "依字母排序"])
 
+    # === 分數閾值篩選 ===
+    st.markdown("---")
+    st.subheader("📏 分數篩選（原始成績）")
+    enable_threshold = st.checkbox("啟用分數閾值篩選", value=False)
+    if enable_threshold:
+        threshold_mode = st.radio("篩選模式", ["顯示 ≥ 閾值", "顯示 ≤ 閾值"])
+        # 根據顯示模式決定預設值與範圍
+        if normalize_0_100:
+            threshold_value = st.slider("閾值", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
+        else:
+            threshold_value = st.slider("閾值", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+        st.caption(f"僅顯示平均分數{'≥' if threshold_mode == '顯示 ≥ 閾值' else '≤'} {threshold_value} 的類別")
+    else:
+        threshold_mode = None
+        threshold_value = None
+
     # === Baseline Δ 圖表的控制 ===
     st.markdown("---")
     st.subheader("差距分析設定（Baseline Δ）")
@@ -130,6 +146,14 @@ metric_plot = "accuracy_mean" + (" (x100)" if normalize_0_100 else "")
 work[metric_plot] = work["accuracy_mean"] * (100.0 if normalize_0_100 else 1.0)
 
 order_df = work.groupby("category")[metric_plot].mean().reset_index()
+
+# === 套用閾值篩選 ===
+if enable_threshold and threshold_value is not None:
+    if threshold_mode == "顯示 ≥ 閾值":
+        order_df = order_df[order_df[metric_plot] >= threshold_value]
+    else:  # "顯示 ≤ 閾值"
+        order_df = order_df[order_df[metric_plot] <= threshold_value]
+
 if sort_mode == "依整體平均由高到低":
     order_df = order_df.sort_values(metric_plot, ascending=False)
 elif sort_mode == "依整體平均由低到高":
@@ -138,12 +162,21 @@ else:
     order_df = order_df.sort_values("category", ascending=True)
 
 cat_order = order_df["category"].tolist()
+
+# 如果篩選後沒有類別，顯示提示
+if not cat_order:
+    st.warning(f"⚠️ 沒有類別符合篩選條件（{threshold_mode}: {threshold_value}），請調整閾值或關閉篩選。")
+    st.stop()
+
 work["category"] = pd.Categorical(work["category"], categories=cat_order, ordered=True)
 
 n = len(cat_order)
 pages = int(np.ceil(n / page_size))
 
 st.markdown("## 📈 原始成績（各模型 × 類別）")
+if enable_threshold and threshold_mode is not None:
+    st.info(f"🔍 已啟用篩選：顯示平均分數 {threshold_mode.replace('顯示 ', '')} {threshold_value} 的類別（共 {n} 個）")
+
 for p in range(pages):
     start, end = p * page_size, min((p + 1) * page_size, n)
     subset_cats = cat_order[start:end]
