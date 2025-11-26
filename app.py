@@ -108,6 +108,38 @@ with st.sidebar:
     page_size = st.selectbox("每張圖顯示幾個類別", [10, 20, 30, 50, 100], index=1)
     sort_mode = st.selectbox("排序方式（原始成績）", ["依整體平均由高到低", "依整體平均由低到高", "依字母排序"])
 
+    # === 分數閾值篩選 ===
+    st.markdown("---")
+    st.subheader("📏 分數篩選（原始成績）")
+    enable_threshold = st.checkbox("啟用分數閾值篩選", value=False)
+    if enable_threshold:
+        threshold_mode = st.radio("篩選模式", ["顯示 ≥ 閾值", "顯示 ≤ 閾值"])
+        
+        # 篩選依據選擇
+        filter_basis = st.radio(
+            "篩選依據",
+            ["任一模型符合", "特定模型符合"],
+            help="任一模型符合：只要有任一個模型在該類別符合條件就顯示\n特定模型符合：只篩選特定模型的分數"
+        )
+        
+        specific_model = None
+        if filter_basis == "特定模型符合":
+            all_models = sorted(df_all["source_label"].unique().tolist()) if not df_all.empty else []
+            if all_models:
+                specific_model = st.selectbox("選擇模型", options=all_models)
+        
+        # 根據顯示模式決定預設值與範圍
+        if normalize_0_100:
+            threshold_value = st.slider("閾值", min_value=0.0, max_value=100.0, value=50.0, step=1.0)
+        else:
+            threshold_value = st.slider("閾值", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+        st.caption(f"{'≥' if threshold_mode == '顯示 ≥ 閾值' else '≤'} {threshold_value}")
+    else:
+        threshold_mode = None
+        threshold_value = None
+        filter_basis = None
+        specific_model = None
+
     # === Baseline Δ 圖表的控制 ===
     st.markdown("---")
     st.subheader("差距分析設定（Baseline Δ）")
@@ -129,7 +161,32 @@ work = df_all[df_all["dataset"] == selected_dataset].copy()
 metric_plot = "accuracy_mean" + (" (x100)" if normalize_0_100 else "")
 work[metric_plot] = work["accuracy_mean"] * (100.0 if normalize_0_100 else 1.0)
 
-order_df = work.groupby("category")[metric_plot].mean().reset_index()
+# === 套用閾值篩選 ===
+if enable_threshold and threshold_value is not None:
+    if filter_basis == "任一模型符合":
+        # 篩選方式：只要有任一模型在該類別符合條件
+        if threshold_mode == "顯示 ≥ 閾值":
+            # 保留那些「至少有一個模型 ≥ 閾值」的類別
+            valid_cats = work[work[metric_plot] >= threshold_value]["category"].unique().tolist()
+        else:  # "顯示 ≤ 閾值"
+            # 保留那些「至少有一個模型 ≤ 閾值」的類別
+            valid_cats = work[work[metric_plot] <= threshold_value]["category"].unique().tolist()
+        work = work[work["category"].isin(valid_cats)]
+        # 計算平均用於排序
+        order_df = work.groupby("category")[metric_plot].mean().reset_index()
+    else:  # "特定模型符合"
+        # 只篩選特定模型的資料，然後依該模型判斷
+        work_specific = work[work["source_label"] == specific_model]
+        if threshold_mode == "顯示 ≥ 閾值":
+            valid_cats = work_specific[work_specific[metric_plot] >= threshold_value]["category"].unique().tolist()
+        else:  # "顯示 ≤ 閾值"
+            valid_cats = work_specific[work_specific[metric_plot] <= threshold_value]["category"].unique().tolist()
+        # 保留符合條件的類別，但顯示所有模型
+        work = work[work["category"].isin(valid_cats)]
+        order_df = work.groupby("category")[metric_plot].mean().reset_index()
+else:
+    order_df = work.groupby("category")[metric_plot].mean().reset_index()
+
 if sort_mode == "依整體平均由高到低":
     order_df = order_df.sort_values(metric_plot, ascending=False)
 elif sort_mode == "依整體平均由低到高":
@@ -138,12 +195,27 @@ else:
     order_df = order_df.sort_values("category", ascending=True)
 
 cat_order = order_df["category"].tolist()
+
+# 如果篩選後沒有類別，顯示提示
+if not cat_order:
+    if enable_threshold and threshold_mode is not None and threshold_value is not None:
+        st.warning(
+            f"⚠️ 沒有類別符合篩選條件（{threshold_mode}: {threshold_value}），請調整閾值或關閉篩選。"
+        )
+    else:
+        st.warning("⚠️ 沒有可顯示的類別，請檢查資料集內容或調整篩選條件。")
+    st.stop()
+
 work["category"] = pd.Categorical(work["category"], categories=cat_order, ordered=True)
 
 n = len(cat_order)
 pages = int(np.ceil(n / page_size))
 
 st.markdown("## 📈 原始成績（各模型 × 類別）")
+if enable_threshold and threshold_mode is not None:
+    filter_info = f"任一模型符合" if filter_basis == "任一模型符合" else f"模型 {specific_model} 符合"
+    st.info(f"🔍 已啟用篩選（{filter_info}）：顯示平均分數 {threshold_mode.replace('顯示 ', '')} {threshold_value} 的類別（共 {n} 個）")
+
 for p in range(pages):
     start, end = p * page_size, min((p + 1) * page_size, n)
     subset_cats = cat_order[start:end]
