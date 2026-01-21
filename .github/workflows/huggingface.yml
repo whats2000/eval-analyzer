@@ -18,4 +18,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push --force https://oauth2:$HF_TOKEN@huggingface.co/spaces/whats2000/tw-eval-analyzer main
+          git push --force https://oauth2:$HF_TOKEN@huggingface.co/spaces/twinkle-ai/tw-eval-analyzer main
